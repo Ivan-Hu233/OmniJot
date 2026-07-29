@@ -117,7 +117,6 @@ defineExpose({
   
   height: 100%;
   overflow: auto;
-  min-height: 120px;
   transition: border-color 0.15s ease;
 }
 
@@ -126,13 +125,11 @@ defineExpose({
 }
 
 .editor-mount {
-  min-height: 100%;
   outline: none;
 }
 
 .editor-mount :deep(.ProseMirror) {
   padding: 0;
-  min-height: 120px;
   outline: none;
 }
 </style>

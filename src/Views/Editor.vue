@@ -1,57 +1,83 @@
 <template>
-  <v-sheet>
-    <v-btn @click="save">保存</v-btn>
-    <v-btn @click="load">加载</v-btn>
-    <v-btn data-test="add-rich" @click="addRichText">➕ 添加富文本</v-btn>
-    <v-btn data-test="add-code" @click="addCodeBlock">➕ 添加代码块</v-btn>
-    <v-btn @click="batchToggleHeading(2)">选中设为二级标题</v-btn>
-    <v-btn @click="toggleEditMode">
-      {{ isEditMode ? '切换到只读' : '切换到编辑' }}
-    </v-btn>
+  <v-sheet class="editor-wrapper">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <v-btn @click="save">保存</v-btn>
+      <v-btn @click="load">加载</v-btn>
+      <v-btn data-test="add-rich" @click="addRichText">➕ 添加富文本</v-btn>
+      <v-btn data-test="add-code" @click="addCodeBlock">➕ 添加代码块</v-btn>
+      <v-btn @click="batchToggleHeading(2)">选中设为二级标题</v-btn>
+      <v-btn @click="toggleEditMode">
+        {{ isEditMode ? '切换到只读' : '切换到编辑' }}
+      </v-btn>
+    </div>
 
-    <div class="canvas">
-      <template v-for="item in state.items" :key="item.id" class="drag-wrapper"
-        :class="{ selected: isEditMode && state.selectedIds.has(item.id) }">
-        <VueDraggableResizable :x="item.x" :y="item.y" :w="item.w" :h="item.h" :min-width="100" :min-height="100"
-          :is-conflict-check="true" :snap="true" :snap-tolerance="10" parent=".canvas" :active-on-top="true"
-          @dragstop="(x, y) => { item.x = x; item.y = y }" drag-handle=".drag-handle"
-          @resizestop="(x, y, w, h) => { item.x = x; item.y = y; item.w = w; item.h = h }" :disabled="!isEditMode">
-          <div class="block-container"
-            style="height:100%; width:100%; position:relative; overflow:visible; background: #fff; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.12);">
-
-            <!-- 左上角：名称 + 图标 -->
-            <div v-if="isEditMode" class="drag-handle" @mousedown="(e) => handleSelect(item.id, e)"
-              style="position:absolute; top:-28px; left:10px; height:28px; padding:0 10px; display:flex; align-items:center; cursor:grab; background:#f5f5f5; border-radius:4px 4px 0 0; border:1px solid #e0e0e0; border-bottom:0; z-index:10; white-space:nowrap;">
-              <v-icon size="16" color="grey-darken-2" :icon="mdiDragVertical" />
-              <span style="font-size:12px; color:#666; user-select:none; margin-left:4px;">
-                {{ item.component === 'RichTextEditor' ? '富文本' : '代码块' }}
-              </span>
-            </div>
-
-            <!-- 右上角：选中指示器 -->
-            <transition name="pop-up">
-              <div v-if="isEditMode && state.selectedIds.has(item.id)" class="drag-handle"
-                @mousedown="(e) => handleSelect(item.id, e)"
-                style="position:absolute; top:-28px; right:10px; height:28px; width:28px; display:flex; align-items:center; justify-content:center; cursor:grab; background:#f5f5f5; border-radius:4px 4px 0 0; border:1px solid #e0e0e0; border-bottom:0; z-index:10;">
-                <div style="width:12px; height:12px; border-radius:50%;"
-                  :style="{ backgroundColor: String(primaryColor) }"></div>
+    <!-- 画布区域 -->
+    <div class="canvas-container">
+      <div class="canvas" @click="handleCanvasClick">
+        <template v-for="item in state.items" :key="item.id">
+          <!-- 直接使用 VueDraggableResizable，不再套 div -->
+          <VueDraggableResizable
+            :x="item.x"
+            :y="item.y"
+            :w="item.w"
+            :h="item.h"
+            :min-width="100"
+            :min-height="100"
+            :is-conflict-check="true"
+            :snap="true"
+            :snap-tolerance="10"
+            parent=".canvas"
+            :active-on-top="true"
+            @dragstop="(x, y) => { item.x = x; item.y = y }"
+            drag-handle=".drag-handle"
+            @resizestop="(x, y, w, h) => { item.x = x; item.y = y; item.w = w; item.h = h }"
+            :disabled="!isEditMode"
+            class="drag-wrapper"
+            :class="{ selected: isEditMode && state.selectedIds.has(item.id) }"
+          >
+            <div class="block-container">
+              <!-- 左上角手柄 -->
+              <div
+                v-if="isEditMode"
+                class="drag-handle left-handle"
+                @pointerdown="(e) => handleSelect(item.id, e)"
+              >
+                <v-icon size="16" color="grey-darken-2" :icon="mdiDragVertical" />
+                <span class="handle-label">
+                  {{ item.component === 'RichTextEditor' ? '富文本' : '代码块' }}
+                </span>
               </div>
-            </transition>
 
-            <!-- 内容区域 -->
-            <div style="background-color: transparent; height:100%; width:100%; padding:4px; box-sizing:border-box;">
-              <component style="height:100%;" :is="componentMap[item.component as keyof typeof componentMap]"
-                :ref="(el) => setComponentRef(item.id, el)" v-bind="getComponentProps(item)"
-                @update:model-value="(val: string) => updateCode(item.id, val)"
-                @update:language="(lang: string) => updateLanguage(item.id, lang)" />
+              <!-- 右上角选中指示器 -->
+              <transition name="pop-up">
+                <div
+                  v-if="isEditMode && state.selectedIds.has(item.id)"
+                  class="drag-handle right-handle"
+                  @mousedown="(e) => handleSelect(item.id, e)"
+                >
+                  <div class="selected-dot" :style="{ backgroundColor: primaryColor }"></div>
+                </div>
+              </transition>
+
+              <!-- 内容区域 -->
+              <div class="content-area">
+                <component
+                  :is="componentMap[item.component as keyof typeof componentMap]"
+                  :ref="(el) => setComponentRef(item.id, el)"
+                  v-bind="getComponentProps(item)"
+                  @update:model-value="(val: string) => updateCode(item.id, val)"
+                  @update:language="(lang: string) => updateLanguage(item.id, lang)"
+                  class="inner-component"
+                />
+              </div>
             </div>
-          </div>
-        </VueDraggableResizable>
-      </template>
+          </VueDraggableResizable>
+        </template>
+      </div>
     </div>
   </v-sheet>
 </template>
-
 <script setup lang="ts">
 import { reactive, ref, nextTick, onMounted, computed } from 'vue'
 import VueDraggableResizable from 'vue-draggable-resizable-gorkys'
@@ -276,34 +302,144 @@ onMounted(() => {
   load()
 })
 </script>
-
 <style scoped>
+/* ---------- 整体布局 ---------- */
+.editor-wrapper {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 500px;
+}
+
+.toolbar {
+  flex-shrink: 0;
+  padding: 8px 16px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  background: #fafafa;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.canvas-container {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px 0;
+  overflow: hidden;
+}
+
 .canvas {
   position: relative;
-  width: calc(100% - 112px);
+  width: 90%;
+  max-width: 1200px;
   height: 100%;
-  /* width: 1000px;
-  height: 800px; */
+  min-height: 400px;
   background: transparent;
   border: 1px solid #ddd;
-  left: 56px;
-  overflow: visible !important;
-  /* 允许手柄溢出 */
+  border-radius: 4px;
+  overflow: visible;        /* 手柄溢出可见 */
+  box-sizing: border-box;
 }
 
+/* ---------- 直接作用在 VueDraggableResizable 根元素上的类 ---------- */
 .drag-wrapper {
-  position: absolute;
+  /* 不需要额外定位，VueDraggableResizable 自己管理 left/top/width/height */
+  /* 只保留选中边框样式 */
 }
 
-.drag-wrapper.selected .vdr {
+.drag-wrapper.selected {
   outline: 2px solid var(--v-theme-primary);
+  outline-offset: -1px;     /* 让边框在内部，避免遮住手柄 */
 }
 
-/* 动画 */
-/* 右上角指示器整体弹出动画 */
-.pop-up-enter-active,/* TODO 更改动画，更有机械感 */
+/* ---------- 块内部 ---------- */
+.block-container {
+  height: 100%;
+  width: 100%;
+  position: relative;
+  overflow: visible;
+  background: #fff;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- 手柄 ---------- */
+.drag-handle {
+  position: absolute;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  cursor: grab;
+  background: #f5f5f5;
+  border: 1px solid #e0e0e0;
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+  z-index: 10;
+  padding: 0 10px;
+  white-space: nowrap;
+  box-sizing: border-box;
+  user-select: none;
+  transition: background 0.2s;
+}
+.drag-handle:hover {
+  background: #eaeaea;
+}
+
+.left-handle {
+  bottom: 100%;
+  left: 10px;
+  transform: translateY(-1px);
+}
+
+.right-handle {
+  bottom: 100%;
+  right: 10px;
+  transform: translateY(-1px);
+  width: 28px;
+  justify-content: center;
+  padding: 0;
+}
+
+.right-handle .selected-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background-color: var(--v-theme-primary);
+}
+
+.handle-label {
+  font-size: 12px;
+  color: #666;
+  margin-left: 4px;
+}
+
+/* ---------- 内容区域 ---------- */
+.content-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 4px;
+  box-sizing: border-box;
+  background-color: transparent;
+}
+
+.inner-component {
+  flex: 1;
+  min-height: 0;
+  height: 100%;
+  width: 100%;
+}
+
+/* ---------- 选中指示器动画 ---------- */
+.pop-up-enter-active,
 .pop-up-leave-active {
-  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1); /* 弹性缓动 */
+  transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 .pop-up-enter-from {
   opacity: 0;
