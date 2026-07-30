@@ -14,9 +14,8 @@
 
     <!-- 画布区域 -->
     <div class="canvas-container">
-      <div class="canvas" @click="handleCanvasClick">
+      <div class="canvas" @click="handleCanvasClick" ref="canvasRef">
         <template v-for="item in state.items" :key="item.id">
-          <!-- 直接使用 VueDraggableResizable，不再套 div -->
           <VueDraggableResizable
             :x="item.x"
             :y="item.y"
@@ -24,11 +23,13 @@
             :h="item.h"
             :min-width="100"
             :min-height="100"
-            :is-conflict-check="true"
+            :is-conflict-check="!isMobile"
             :snap="true"
             :snap-tolerance="10"
-            parent=".canvas"
+            parent
             :active-on-top="true"
+            :axis="isMobile ? 'y' : 'both'"
+            :handles="isMobile ? ['tm', 'bm'] : undefined"
             @dragstop="(x, y) => { item.x = x; item.y = y }"
             drag-handle=".drag-handle"
             @resizestop="(x, y, w, h) => { item.x = x; item.y = y; item.w = w; item.h = h }"
@@ -36,6 +37,8 @@
             class="drag-wrapper"
             :class="{ selected: isEditMode && state.selectedIds.has(item.id) }"
           >
+            <!-- TODO 手动实现冲突检测 -->
+            <!--- TODO 手机端布局和电脑端相互适配 -->
             <div class="block-container">
               <!-- 左上角手柄 -->
               <div
@@ -78,8 +81,9 @@
     </div>
   </v-sheet>
 </template>
+
 <script setup lang="ts">
-import { reactive, ref, nextTick, onMounted, computed } from 'vue'
+import { reactive, ref, nextTick, onMounted, onUnmounted, computed, watch } from 'vue'
 import VueDraggableResizable from 'vue-draggable-resizable-gorkys'
 import 'vue-draggable-resizable-gorkys/style.css'
 
@@ -88,18 +92,24 @@ import RichTextEditor from '../Controls/BaseIrEditor/RichTextEditor.vue'
 import EditableCodeBlock from '../Controls/EditorPlugin/EditableCodeBlock.vue'
 import { NodeJSON } from '@prosekit/core'
 
-import { useTheme } from 'vuetify'
+import { useTheme, useDisplay } from 'vuetify'
+
 const theme = useTheme()
 const primaryColor = computed(() => theme.current.value.colors.primary)
 
-const isEditMode = ref(true);
+// ---------- 响应式断点 ----------
+const { xs } = useDisplay()
+const isMobile = computed(() => xs.value)
+
+// ---------- 编辑模式 ----------
+const isEditMode = ref(true)
 const toggleEditMode = () => {
   isEditMode.value = !isEditMode.value
 }
 
 // ---------- 类型定义 ----------
 interface RichTextConfig {
-  content: NodeJSON | null // 富文本文档 JSON，允许 null
+  content: NodeJSON | null
 }
 
 interface CodeBlockConfig {
@@ -135,12 +145,18 @@ const state = reactive({
   selectedIds: new Set<string>(),
 })
 const componentRefs = ref<Record<string, any>>({})
+const canvasRef = ref<HTMLElement | null>(null)
+const canvasWidth = ref(0)
+
+// ---------- 移动端边距常量 ----------
+const MOBILE_MARGIN = 8 // 左右对称边距
 
 // ---------- 辅助函数 ----------
 const getComponentProps = (item: CanvasItem) => {
   if (item.component === 'RichTextEditor') {
     return {
-      doc: (item.config as RichTextConfig).content, // 可为 null
+      doc: (item.config as RichTextConfig).content,
+      compact: isMobile.value, // 关键
     }
   }
   if (item.component === 'EditableCodeBlock') {
@@ -178,25 +194,22 @@ const setComponentRef = (id: string, el: any) => {
 
 const handleSelect = (id: string, e: MouseEvent) => {
   if (e.ctrlKey) {
-    // 创建新 Set 并基于当前选中切换
-    const newSet = new Set(state.selectedIds);
+    const newSet = new Set(state.selectedIds)
     if (newSet.has(id)) {
-      newSet.delete(id);
+      newSet.delete(id)
     } else {
-      newSet.add(id);
+      newSet.add(id)
     }
-    state.selectedIds = newSet;  // 重新赋值触发更新
+    state.selectedIds = newSet
   } else {
-    state.selectedIds = new Set([id]);  // 直接替换
+    state.selectedIds = new Set([id])
   }
 }
 
-// 处理画布空白点击取消选中
 const handleCanvasClick = (e: MouseEvent) => {
-  const target = e.target as HTMLElement;
-  // 如果点击的元素或其父级包含 .drag-wrapper，则忽略（因为内部点击已由 handleSelect 处理）
-  if (target.closest('.drag-wrapper')) return;
-  state.selectedIds = new Set();  // 清空选中
+  const target = e.target as HTMLElement
+  if (target.closest('.drag-wrapper')) return
+  state.selectedIds = new Set()
 }
 
 // ---------- 同步与存储 ----------
@@ -218,18 +231,59 @@ let nextX = 20
 let nextY = 20
 const STEP = 30
 
+// ---------- 移动端布局适配 ----------
+const updateCanvasWidth = () => {
+  if (canvasRef.value) {
+    canvasWidth.value = canvasRef.value.clientWidth
+  }
+}
+
+const applyMobileLayout = () => {
+  if (isMobile.value && canvasWidth.value > 0) {
+    const margin = MOBILE_MARGIN
+    state.items.forEach(item => {
+      item.x = margin
+      item.w = canvasWidth.value - 2 * margin
+    })
+  }
+}
+
+// 监听移动端状态变化，切换布局
+watch(isMobile, (newVal) => {
+  if (newVal) {
+    nextTick(() => {
+      updateCanvasWidth()
+      applyMobileLayout()
+    })
+  }
+})
+
+// 窗口 resize 时更新宽度并重新布局（若在移动端）
+const onResize = () => {
+  updateCanvasWidth()
+  if (isMobile.value) {
+    applyMobileLayout()
+  }
+}
+
 // ---------- 添加组件 ----------
 const addRichText = () => {
   const id = generateId()
-  state.items.push({
+  const newItem: CanvasItem = {
     id,
     x: nextX,
     y: nextY,
     w: 400,
     h: 300,
     component: 'RichTextEditor',
-    config: { content: null }, // 初始为空
-  })
+    config: { content: null },
+  }
+  state.items.push(newItem)
+  if (isMobile.value && canvasWidth.value > 0) {
+    const margin = MOBILE_MARGIN
+    newItem.x = margin
+    newItem.w = canvasWidth.value - 2 * margin
+  }
   nextX += STEP
   nextY += STEP
   if (nextX > 500) {
@@ -240,7 +294,7 @@ const addRichText = () => {
 
 const addCodeBlock = () => {
   const id = generateId()
-  state.items.push({
+  const newItem: CanvasItem = {
     id,
     x: nextX,
     y: nextY,
@@ -253,7 +307,13 @@ const addCodeBlock = () => {
       minWidth: '300px',
       minHeight: '200px',
     },
-  })
+  }
+  state.items.push(newItem)
+  if (isMobile.value && canvasWidth.value > 0) {
+    const margin = MOBILE_MARGIN
+    newItem.x = margin
+    newItem.w = canvasWidth.value - 2 * margin
+  }
   nextX += STEP
   nextY += STEP
   if (nextX > 500) {
@@ -263,21 +323,24 @@ const addCodeBlock = () => {
 }
 
 // ---------- 保存 / 加载 ----------
-const save = () => {//TODO rust后端保存数据
+const save = () => {
   syncRichTextContent()
   localStorage.setItem('canvasData', JSON.stringify(state.items))
 }
 
-const load = () => {//TODO rust后端保存数据
+const load = () => {
   const raw = localStorage.getItem('canvasData')
   if (raw) {
     state.items = JSON.parse(raw)
     nextTick(() => {
+      if (isMobile.value) {
+        updateCanvasWidth()
+        applyMobileLayout()
+      }
       state.items.forEach((item) => {
         if (item.component === 'RichTextEditor') {
           const inst = componentRefs.value[item.id]
           const content = (item.config as RichTextConfig).content
-          // 如果 content 为 null，编辑器会自行处理空状态
           if (inst && content) {
             inst.importJSON?.(content)
           }
@@ -298,12 +361,25 @@ const batchToggleHeading = (level: number) => {
   })
 }
 
+// ---------- 生命周期 ----------
 onMounted(() => {
   load()
+  nextTick(() => {
+    updateCanvasWidth()
+    if (isMobile.value) {
+      applyMobileLayout()
+    }
+  })
+  window.addEventListener('resize', onResize)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', onResize)
 })
 </script>
+
 <style scoped>
-/* ---------- 整体布局 ---------- */
+/* 样式未作改动，保持原样 */
 .editor-wrapper {
   display: flex;
   flex-direction: column;
@@ -339,22 +415,15 @@ onMounted(() => {
   background: transparent;
   border: 1px solid #ddd;
   border-radius: 4px;
-  overflow: visible;        /* 手柄溢出可见 */
+  overflow: visible;
   box-sizing: border-box;
-}
-
-/* ---------- 直接作用在 VueDraggableResizable 根元素上的类 ---------- */
-.drag-wrapper {
-  /* 不需要额外定位，VueDraggableResizable 自己管理 left/top/width/height */
-  /* 只保留选中边框样式 */
 }
 
 .drag-wrapper.selected {
   outline: 2px solid var(--v-theme-primary);
-  outline-offset: -1px;     /* 让边框在内部，避免遮住手柄 */
+  outline-offset: -1px;
 }
 
-/* ---------- 块内部 ---------- */
 .block-container {
   height: 100%;
   width: 100%;
@@ -368,7 +437,6 @@ onMounted(() => {
   flex-direction: column;
 }
 
-/* ---------- 手柄 ---------- */
 .drag-handle {
   position: absolute;
   height: 28px;
@@ -418,7 +486,6 @@ onMounted(() => {
   margin-left: 4px;
 }
 
-/* ---------- 内容区域 ---------- */
 .content-area {
   flex: 1;
   display: flex;
@@ -436,7 +503,6 @@ onMounted(() => {
   width: 100%;
 }
 
-/* ---------- 选中指示器动画 ---------- */
 .pop-up-enter-active,
 .pop-up-leave-active {
   transition: all 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
